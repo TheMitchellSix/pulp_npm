@@ -15,7 +15,7 @@ from pulpcore.plugin.models import (
 )
 from pulpcore.plugin.util import get_domain_pk
 
-from .utils import extract_package_info, urlpath_sanitize
+from .utils import extract_npm_package_json_from_artifact, extract_package_info, urlpath_sanitize
 
 logger = getLogger(__name__)
 
@@ -159,14 +159,29 @@ class NpmDistribution(Distribution, AutoAddObjPermsMixin):
         for package in packages:
             tarball_url = f"{prefix_url}{package.name}/-/{package.relative_path.split('/')[-1]}"
 
-            version = {
-                package.version: {
-                    "_id": f"{package.name}@{package.version}",
-                    "dist": {"tarball": tarball_url},
-                }
-            }
+            manifest = {}
+            content_artifact = package.contentartifact_set.filter(artifact__isnull=False).first()
+            if content_artifact is not None:
+                try:
+                    manifest = extract_npm_package_json_from_artifact(content_artifact.artifact)
+                except ValueError as e:
+                    logger.warning(
+                        "Could not read full package.json for %s@%s, serving minimal "
+                        "metadata instead: %s",
+                        package.name,
+                        package.version,
+                        e,
+                    )
+                    manifest = {}
+
+            version_data = dict(manifest)
+            version_data["_id"] = f"{package.name}@{package.version}"
+            version_data["name"] = package.name
+            version_data["version"] = package.version
+            version_data["dist"] = {**manifest.get("dist", {}), "tarball": tarball_url}
+
+            data["versions"][package.version] = version_data
             versions.append(package.version)
-            data["versions"].update(version)
 
         parsed = {v: semver.Version.parse(v) for v in versions if semver.Version.is_valid(v)}
         stable_versions = [v for v, parsed_v in parsed.items() if not parsed_v.prerelease]

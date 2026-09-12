@@ -42,9 +42,9 @@ def extract_package_info(relative_path):
         return None, None
 
 
-def extract_npm_metadata_from_artifact(artifact):
+def extract_npm_package_json_from_artifact(artifact):
     """
-    Extract name and version from an npm package tarball.
+    Extract the full, parsed ``package.json`` manifest from an npm package tarball.
 
     npm tarballs are gzipped tar archives containing a ``package/package.json``
     (or ``<name>/package.json`` for scoped packages).
@@ -53,7 +53,7 @@ def extract_npm_metadata_from_artifact(artifact):
         artifact: A Pulp Artifact whose file is an npm tarball (.tgz).
 
     Returns:
-        dict: A dictionary with ``name`` and ``version`` keys.
+        dict: The full parsed contents of ``package.json``.
 
     Raises:
         ValueError: If the tarball cannot be read or ``package.json`` is missing/invalid.
@@ -84,6 +84,24 @@ def extract_npm_metadata_from_artifact(artifact):
                 package_data = json.load(f)
     except (tarfile.TarError, OSError) as e:
         raise ValueError(f"Failed to read npm tarball: {e}")
+
+    return package_data
+
+
+def extract_npm_metadata_from_artifact(artifact):
+    """
+    Extract name and version from an npm package tarball.
+
+    Args:
+        artifact: A Pulp Artifact whose file is an npm tarball (.tgz).
+
+    Returns:
+        dict: A dictionary with ``name`` and ``version`` keys.
+
+    Raises:
+        ValueError: If the tarball cannot be read or ``package.json`` is missing/invalid.
+    """
+    package_data = extract_npm_package_json_from_artifact(artifact)
 
     name = package_data.get("name")
     version = package_data.get("version")
