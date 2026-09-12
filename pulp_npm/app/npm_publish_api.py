@@ -4,8 +4,9 @@ from logging import getLogger
 from tempfile import NamedTemporaryFile
 from urllib.parse import unquote
 
+from django.conf import settings
 from django.db import IntegrityError
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from rest_framework.exceptions import Throttled
 from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
@@ -18,6 +19,7 @@ from pulpcore.plugin.util import get_domain
 
 from .models import NpmDistribution, Package
 from .tasks.publish import aadd_and_remove
+from .utils import urlpath_sanitize
 
 logger = getLogger(__name__)
 
@@ -40,7 +42,7 @@ def _decode_package_name(raw_name):
 
 
 class NpmPublishView(APIView):
-    """Handle npm/yarn publish requests (``PUT /<package>``)."""
+    """Handle npm/yarn publish (``PUT /<package>``) and metadata reads (``GET /<package>``)."""
 
     parser_classes = [JSONParser]
     permission_classes = [AccessPolicyFromDB]
@@ -56,6 +58,11 @@ class NpmPublishView(APIView):
                 "principal": "authenticated",
                 "effect": "allow",
                 "condition": "npm_has_repository_perm:npm.modify_npmrepository",
+            },
+            {
+                "action": ["get"],
+                "principal": "*",
+                "effect": "allow",
             },
         ],
     }
@@ -74,6 +81,39 @@ class NpmPublishView(APIView):
                 pulp_domain=domain,
             )
         return self._distribution
+
+    def get(self, request, path, package_name):
+        """Redirect npm metadata reads to the equivalent content app URL.
+
+        npm resolves a scope to a single registry URL and sends both publish
+        (``PUT``) and metadata/install (``GET``) requests there, so the
+        ``npm/...`` publish endpoint needs to answer package-metadata GET
+        requests too, not just PUT (see GH #420). The content app already
+        generates this metadata dynamically via
+        ``NpmDistribution.content_handler``, so this redirects rather than
+        duplicating that logic -- same pattern as ``pulp_python``'s
+        ``SimpleView.retrieve()``.
+        """
+        distribution = self.distribution
+        domain = get_domain()
+
+        if settings.DOMAIN_ENABLED:
+            content_url = urlpath_sanitize(
+                settings.CONTENT_ORIGIN,
+                settings.CONTENT_PATH_PREFIX,
+                domain.name,
+                distribution.base_path,
+                package_name,
+            )
+        else:
+            content_url = urlpath_sanitize(
+                settings.CONTENT_ORIGIN,
+                settings.CONTENT_PATH_PREFIX,
+                distribution.base_path,
+                package_name,
+            )
+
+        return redirect(content_url)
 
     def put(self, request, path, package_name):
         package_name = _decode_package_name(package_name)

@@ -1,0 +1,1 @@
+Added ``GET`` support to the native npm registry publish endpoint, redirecting metadata reads to the content app so a scope's registry URL can be used for both publish and install.
