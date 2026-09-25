@@ -157,7 +157,7 @@ class NpmDistribution(Distribution, AutoAddObjPermsMixin):
                     "npm/npmjs-proxy",
                     path,
                 )
-                return Response(status=302, headers={"Location": proxy_url})
+                return Response(status=302, headers={"Location": proxy_url}, body=b"")
             return None
 
         packages = published_packages
