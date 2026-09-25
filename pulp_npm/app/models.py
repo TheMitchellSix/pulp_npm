@@ -141,8 +141,10 @@ class NpmDistribution(Distribution, AutoAddObjPermsMixin):
         # every subsequent metadata request would otherwise be served from that
         # frozen snapshot forever, since nothing here ever re-consults upstream.
         # If nothing under this name was genuinely published, treat the local
-        # copies as a stale cache and redirect to the read-through proxy
-        # distribution instead, so `latest`/`dist-tags` always reflect the real
+        # copies as a stale cache and redirect to a sibling read-through proxy
+        # distribution instead (same remote, no repository of its own -- the
+        # thing that made pulpcore's core pull-through raw-passthrough it in
+        # the first place), so `latest`/`dist-tags` always reflect the real
         # registry. npm's `replace-registry-host` rewrites tarball URLs in the
         # proxied response onto *this* distribution's own content path (not the
         # redirect target), so tarball downloads still land here and get cached
@@ -150,11 +152,20 @@ class NpmDistribution(Distribution, AutoAddObjPermsMixin):
         published_packages = packages.filter(contentartifact__remoteartifact__isnull=True)
 
         if not published_packages.exists():
-            if self.remote:
+            proxy_distribution = (
+                NpmDistribution.objects.filter(
+                    remote=self.remote,
+                    repository__isnull=True,
+                    pulp_domain=self.pulp_domain,
+                )
+                .exclude(pk=self.pk)
+                .first()
+            )
+            if self.remote and proxy_distribution is not None:
                 proxy_url = urlpath_sanitize(
                     settings.CONTENT_ORIGIN,
                     settings.CONTENT_PATH_PREFIX,
-                    "npm/npmjs-proxy",
+                    proxy_distribution.base_path,
                     path,
                 )
                 return Response(status=302, headers={"Location": proxy_url}, body=b"")
