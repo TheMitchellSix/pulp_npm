@@ -134,6 +134,34 @@ class NpmDistribution(Distribution, AutoAddObjPermsMixin):
         if not packages:
             return None
 
+        # A Package with no RemoteArtifact was created by a real `npm publish`;
+        # one with a RemoteArtifact only exists because core pull-through caching
+        # (NpmRepository.PULL_THROUGH_SUPPORTED) saved a tarball the first time
+        # someone requested it through this distribution. Once that happens,
+        # every subsequent metadata request would otherwise be served from that
+        # frozen snapshot forever, since nothing here ever re-consults upstream.
+        # If nothing under this name was genuinely published, treat the local
+        # copies as a stale cache and redirect to the read-through proxy
+        # distribution instead, so `latest`/`dist-tags` always reflect the real
+        # registry. npm's `replace-registry-host` rewrites tarball URLs in the
+        # proxied response onto *this* distribution's own content path (not the
+        # redirect target), so tarball downloads still land here and get cached
+        # via the same pull-through mechanism.
+        published_packages = packages.filter(contentartifact__remoteartifact__isnull=True)
+
+        if not published_packages.exists():
+            if self.remote:
+                proxy_url = urlpath_sanitize(
+                    settings.CONTENT_ORIGIN,
+                    settings.CONTENT_PATH_PREFIX,
+                    "npm/npmjs-proxy",
+                    path,
+                )
+                return Response(status=302, headers={"Location": proxy_url})
+            return None
+
+        packages = published_packages
+
         data["name"] = name
         data["versions"] = {}
         versions = []
